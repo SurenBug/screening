@@ -2,6 +2,7 @@
   "name": "prenatal-registry",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "Реестр инвазивной пренатальной диагностики",
   "workspaces": [
     "server",
