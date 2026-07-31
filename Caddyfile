@@ -1,0 +1,51 @@
+# Веб-сервер: отдаёт собранный интерфейс и проксирует /api на сервер приложения.
+# Caddy сам получает и продлевает сертификат Let's Encrypt — отдельный certbot не нужен.
+#
+# Адрес сайта берётся из переменной SITE_ADDRESS (задаётся в файле .env рядом с
+# docker-compose.yml). По умолчанию localhost — тогда Caddy делает самоподписанный
+# сертификат, чего достаточно для проверки, но не для работы с реальными данными.
+
+{
+	# Почта для Let's Encrypt: на неё придёт письмо, если сертификат вдруг не продлится.
+	email {$ACME_EMAIL:admin@example.org}
+}
+
+{$SITE_ADDRESS:localhost} {
+	encode zstd gzip
+
+	# Запросы к API уходят на контейнер app (имя сервиса из docker-compose.yml, порт 3001)
+	handle /api/* {
+		reverse_proxy app:3001 {
+			# Чтобы в журнале доступа был виден реальный адрес пользователя,
+			# а не адрес контейнера Caddy
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	# Всё остальное — собранный фронтенд из /srv.
+	# try_files нужен, потому что интерфейс одностраничный: адреса вроде /patients/123
+	# существуют только в браузере, на диске такого файла нет.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+
+	header {
+		# Год HSTS: браузер будет ходить только по HTTPS
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "same-origin"
+		-Server
+	}
+
+	# Файлы с данными пациенток не должны оседать в кеше браузера
+	@html path /index.html /
+	header @html Cache-Control "no-store"
+
+	# Ограничение на размер загружаемого файла — столько же, сколько принимает сервер приложения
+	request_body {
+		max_size 25MB
+	}
+}

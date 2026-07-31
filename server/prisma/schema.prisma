@@ -1,0 +1,490 @@
+// Реестр инвазивной пренатальной диагностики
+// Провайдер меняется на postgresql при развёртывании на сервере — схема одна и та же.
+// Перечисления намеренно хранятся строками: справочники редактируются администратором из интерфейса.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────── Пользователи и доступ ───────────────────────────
+
+model User {
+  id           String    @id @default(cuid())
+  login        String    @unique
+  passwordHash String
+  fullName     String
+  position     String? // должность, для подписи
+  role         String // DOCTOR | LAB | ADMIN
+  isActive     Boolean   @default(true)
+  mustChangePassword Boolean @default(true)
+  telegramId   String?   @unique
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  sessions           Session[]
+  createdPatients    Patient[]   @relation("PatientCreatedBy")
+  operatedProcedures Procedure[] @relation("ProcedureOperator")
+  assistedProcedures Procedure[] @relation("ProcedureAssistant")
+  createdProcedures  Procedure[] @relation("ProcedureCreatedBy")
+  performedResults   Result[]    @relation("ResultPerformedBy")
+  verifiedResults    Result[]    @relation("ResultVerifiedBy")
+  labSamples         Sample[]    @relation("SampleLabUser")
+  auditEntries       AuditLog[]
+  attachments        Attachment[]
+  assignedTasks      Task[]      @relation("TaskAssignee")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  userAgent String?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ─────────────────────────── Справочники ───────────────────────────
+
+// Один универсальный справочник вместо десятка таблиц.
+// type: INDICATION | PROCEDURE_TYPE | ACCESS | MATERIAL_TYPE | METHOD |
+//       RESULT_CATEGORY | COMPLICATION | OUTCOME | INSTITUTION | PLACENTA_LOCATION
+model Dictionary {
+  id        String  @id @default(cuid())
+  type      String
+  code      String
+  label     String
+  // Дополнительные свойства значения (например, срок выполнения метода в днях,
+  // признак «патологический» для категории результата)
+  numValue  Int?
+  flag      Boolean @default(false)
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+  isSystem  Boolean @default(false) // системные значения нельзя удалить
+
+  procedureIndications ProcedureIndication[]
+  sampleMethods        SampleMethod[]
+  procedureComplications ProcedureComplication[]
+
+  @@unique([type, code])
+  @@index([type, isActive])
+}
+
+// ─────────────────────────── Пациентка ───────────────────────────
+
+model Patient {
+  id         String    @id @default(cuid())
+  code       String    @unique // PD-2026-001
+  lastName   String
+  firstName  String
+  middleName String?
+  birthDate  DateTime
+  phone      String?
+  cardNumber String? // номер амбулаторной карты / истории болезни
+  bloodGroup String? // O(I), A(II), B(III), AB(IV)
+  rhesus     String? // POS | NEG
+  address    String?
+  referringInstitution String?
+  snils      String?
+  policy     String?
+
+  // Анамнез
+  gravida       Int? // число беременностей
+  para          Int? // число родов
+  abortions     Int?
+  miscarriages  Int?
+  stillbirths   Int?
+  ivf           Boolean @default(false)
+  consanguinity Boolean @default(false)
+  familyHistory String? // наследственные заболевания в семье
+  obstetricHistory String? // отягощённый акушерский анамнез
+  geneticHistory String? // ХА у предыдущих детей, носительство перестроек
+  teratogens    String?
+  chronicDiseases String?
+  notes         String?
+
+  createdById String
+  createdBy   User   @relation("PatientCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  archivedAt     DateTime?
+  archiveReason  String?
+
+  pregnancies Pregnancy[]
+  attachments Attachment[]
+  tasks       Task[]
+
+  @@index([lastName])
+  @@index([code])
+}
+
+// ─────────────────────────── Беременность и плоды ───────────────────────────
+
+model Pregnancy {
+  id        String  @id @default(cuid())
+  patientId String
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  number       Int? // какая по счёту в системе
+  lmpDate      DateTime? // первый день последней менструации
+  usDate       DateTime? // дата УЗИ, по которому установлен срок
+  usGestWeeks  Int? // срок по этому УЗИ
+  usGestDays   Int?
+  edd          DateTime? // предполагаемая дата родов
+  plurality    String    @default("SINGLE") // SINGLE | MULTIPLE
+  fetusCount   Int       @default(1)
+  chorionicity String? // MONO | DI | TRI
+  amnionicity  String? // MONO | DI | TRI
+  conception   String? // NATURAL | IVF | ICSI | OVULATION_INDUCTION
+  notes        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  fetuses    Fetus[]
+  screenings Screening[]
+  procedures Procedure[]
+
+  @@index([patientId])
+}
+
+model Fetus {
+  id          String    @id @default(cuid())
+  pregnancyId String
+  pregnancy   Pregnancy @relation(fields: [pregnancyId], references: [id], onDelete: Cascade)
+  label       String // A, B, C…
+  sex         String? // MALE | FEMALE | UNKNOWN — по результату
+  notes       String?
+
+  screenings Screening[]
+  samples    Sample[]
+  outcome    Outcome?
+
+  @@unique([pregnancyId, label])
+}
+
+// ─────────────────────────── Скрининг ───────────────────────────
+
+model Screening {
+  id          String    @id @default(cuid())
+  pregnancyId String
+  pregnancy   Pregnancy @relation(fields: [pregnancyId], references: [id], onDelete: Cascade)
+  fetusId     String?
+  fetus       Fetus?    @relation(fields: [fetusId], references: [id])
+
+  trimester  Int? // 1 | 2
+  date       DateTime?
+  gestWeeks  Int?
+  gestDays   Int?
+
+  crl        Float? // КТР, мм
+  ntMm       Float? // ТВП, мм
+  nasalBone  String? // PRESENT | ABSENT | HYPOPLASTIC
+  ductusVenosus String? // NORMAL | REVERSED_A_WAVE
+  tricuspidRegurg String? // NORMAL | PRESENT
+
+  pappaMom   Float?
+  hcgMom     Float?
+  afpMom     Float?
+  ue3Mom     Float?
+  inhibinMom Float?
+
+  riskT21    Int? // знаменатель: 1:250 → 250
+  riskT18    Int?
+  riskT13    Int?
+  riskProgram String? // PRISCA | ASTRAIA | FMF | другое
+
+  niptDone   Boolean @default(false)
+  niptDate   DateTime?
+  niptLab    String?
+  niptResult String? // текст/категория
+
+  usFindings    String? // УЗ-маркеры
+  malformations String? // выявленные пороки
+  notes         String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([pregnancyId])
+}
+
+// ─────────────────────────── Процедура ───────────────────────────
+
+model Procedure {
+  id          String    @id @default(cuid())
+  code        String    @unique // IPD-2026-0001
+  pregnancyId String
+  pregnancy   Pregnancy @relation(fields: [pregnancyId], references: [id], onDelete: Cascade)
+
+  // Статус жизненного цикла:
+  // DRAFT | PLANNED | PERFORMED | IN_LAB | RESULT_READY | RESULT_DELIVERED | OUTCOME_RECORDED | CLOSED | CANCELLED | FAILED
+  status String @default("DRAFT")
+
+  plannedDate DateTime?
+  performedAt DateTime?
+  gestWeeks   Int?
+  gestDays    Int?
+
+  procedureType String? // код из справочника PROCEDURE_TYPE
+  access        String? // TRANSABDOMINAL | TRANSCERVICAL
+  needleGauge   String? // 20G, 21G, 22G
+  punctureCount Int?
+  placentaLocation String?
+  usDevice      String?
+  antibioticProphylaxis Boolean @default(false)
+
+  // Резус-профилактика
+  antiDIndicated Boolean @default(false)
+  antiDGiven     Boolean @default(false)
+  antiDDate      DateTime?
+  antiDDose      String?
+
+  riskValue     Int? // расчётный риск 1:X, на основании которого направили
+  indicationNotes String?
+
+  operatorId  String?
+  operator    User?   @relation("ProcedureOperator", fields: [operatorId], references: [id])
+  assistantId String?
+  assistant   User?   @relation("ProcedureAssistant", fields: [assistantId], references: [id])
+
+  technicalNotes String?
+  notes          String?
+
+  cancelReason String?
+  failureReason String?
+  repeatOfId  String? // ссылка на исходную процедуру при повторе
+  repeatOf    Procedure?  @relation("ProcedureRepeat", fields: [repeatOfId], references: [id])
+  repeats     Procedure[] @relation("ProcedureRepeat")
+
+  createdById String
+  createdBy   User   @relation("ProcedureCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Мягкая блокировка при одновременном редактировании
+  lockedById String?
+  lockedAt   DateTime?
+
+  indications   ProcedureIndication[]
+  complications ProcedureComplication[]
+  samples       Sample[]
+  attachments   Attachment[]
+  tasks         Task[]
+
+  @@index([pregnancyId])
+  @@index([status])
+  @@index([performedAt])
+}
+
+model ProcedureIndication {
+  id           String     @id @default(cuid())
+  procedureId  String
+  procedure    Procedure  @relation(fields: [procedureId], references: [id], onDelete: Cascade)
+  dictionaryId String
+  dictionary   Dictionary @relation(fields: [dictionaryId], references: [id])
+
+  @@unique([procedureId, dictionaryId])
+}
+
+model ProcedureComplication {
+  id           String     @id @default(cuid())
+  procedureId  String
+  procedure    Procedure  @relation(fields: [procedureId], references: [id], onDelete: Cascade)
+  dictionaryId String
+  dictionary   Dictionary @relation(fields: [dictionaryId], references: [id])
+  occurredAt   DateTime?
+  daysAfter    Int? // через сколько дней после процедуры
+  notes        String?
+
+  @@index([procedureId])
+}
+
+// ─────────────────────────── Образец и лаборатория ───────────────────────────
+
+model Sample {
+  id          String    @id @default(cuid())
+  code        String    @unique // IPD-2026-0001-A
+  procedureId String
+  procedure   Procedure @relation(fields: [procedureId], references: [id], onDelete: Cascade)
+  fetusId     String?
+  fetus       Fetus?    @relation(fields: [fetusId], references: [id])
+
+  materialType    String? // AMNIOTIC_FLUID | CHORIONIC_VILLI | FETAL_BLOOD | PLACENTA
+  volume          String?
+  containerNumber String?
+  quality         String? // GOOD | BLOOD_STAINED | INSUFFICIENT
+
+  handedAt   DateTime?
+  receivedAt DateTime?
+  deadline   DateTime?
+
+  // RECEIVED | CULTURING | ANALYSIS | RESULT_READY | ISSUED |
+  // CONTAMINATED | CULTURE_FAILED | INSUFFICIENT
+  status String @default("HANDED")
+
+  labUserId String?
+  labUser   User?   @relation("SampleLabUser", fields: [labUserId], references: [id])
+  notes     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  methods SampleMethod[]
+  results Result[]
+
+  @@index([procedureId])
+  @@index([status])
+}
+
+model SampleMethod {
+  id           String     @id @default(cuid())
+  sampleId     String
+  sample       Sample     @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+  dictionaryId String
+  dictionary   Dictionary @relation(fields: [dictionaryId], references: [id])
+
+  @@unique([sampleId, dictionaryId])
+}
+
+model Result {
+  id       String @id @default(cuid())
+  sampleId String
+  sample   Sample @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+
+  method       String // код метода из справочника
+  reportedAt   DateTime?
+  metaphases   Int?
+  bandingLevel String?
+  quality      String?
+
+  category       String? // код из справочника RESULT_CATEGORY
+  isPathological Boolean @default(false)
+  karyotype      String? // ISCN, например 47,XY,+21
+  sex            String? // MALE | FEMALE
+  conclusion     String?
+
+  performedById String?
+  performedBy   User?   @relation("ResultPerformedBy", fields: [performedById], references: [id])
+  verifiedById  String?
+  verifiedBy    User?   @relation("ResultVerifiedBy", fields: [verifiedById], references: [id])
+
+  deliveredAt     DateTime?
+  deliveryMethod  String? // IN_PERSON | PHONE | OTHER
+  deliveredByName String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  attachments Attachment[]
+
+  @@index([sampleId])
+}
+
+// ─────────────────────────── Исход ───────────────────────────
+
+model Outcome {
+  id      String @id @default(cuid())
+  fetusId String @unique
+  fetus   Fetus  @relation(fields: [fetusId], references: [id], onDelete: Cascade)
+
+  // TERM_BIRTH | PRETERM_BIRTH | TOP (прерывание по мед. показаниям) |
+  // MISCARRIAGE | ANTENATAL_DEATH | LOST_TO_FOLLOWUP | ONGOING
+  outcomeType String?
+  date        DateTime?
+  gestWeeks   Int?
+  gestDays    Int?
+  birthWeight Int? // граммы
+  apgar1      Int?
+  apgar5      Int?
+  childCondition String?
+
+  // MATCH | MISMATCH | NOT_APPLICABLE — совпал ли пренатальный диагноз с постнатальным
+  postnatalConfirmation String?
+  postnatalDiagnosis    String?
+
+  procedureRelatedLoss Boolean @default(false) // потеря в течение 14 дней после процедуры
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─────────────────────────── Служебное ───────────────────────────
+
+model Attachment {
+  id          String  @id @default(cuid())
+  filename    String
+  storedName  String
+  mimeType    String
+  size        Int
+  kind        String? // REFERRAL | PROTOCOL | LAB_REPORT | ULTRASOUND | CONSENT | OTHER
+
+  patientId   String?
+  patient     Patient?   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  procedureId String?
+  procedure   Procedure? @relation(fields: [procedureId], references: [id], onDelete: Cascade)
+  resultId    String?
+  result      Result?    @relation(fields: [resultId], references: [id], onDelete: Cascade)
+
+  uploadedById String
+  uploadedBy   User   @relation(fields: [uploadedById], references: [id])
+  createdAt    DateTime @default(now())
+}
+
+model Task {
+  id   String @id @default(cuid())
+  // RESULT_OVERDUE | DELIVER_RESULT | RECORD_OUTCOME | PATHOLOGY_ALERT | CUSTOM
+  type String
+  title String
+  dueDate DateTime?
+  status  String  @default("OPEN") // OPEN | DONE | SNOOZED | CANCELLED
+  snoozedUntil DateTime?
+
+  patientId   String?
+  patient     Patient?   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  procedureId String?
+  procedure   Procedure? @relation(fields: [procedureId], references: [id], onDelete: Cascade)
+
+  assigneeId String?
+  assignee   User?   @relation("TaskAssignee", fields: [assigneeId], references: [id])
+
+  createdAt   DateTime @default(now())
+  completedAt DateTime?
+
+  @@index([status, dueDate])
+}
+
+model AuditLog {
+  id       String  @id @default(cuid())
+  userId   String?
+  user     User?   @relation(fields: [userId], references: [id])
+  action   String // CREATE | UPDATE | DELETE | VIEW | LOGIN | LOGOUT | EXPORT
+  entity   String
+  entityId String?
+  summary  String?
+  changes  String? // JSON
+  ip       String?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([userId, createdAt])
+}
+
+model Setting {
+  key   String @id
+  value String
+}
+
+model Counter {
+  key   String @id // например patient:2026, procedure:2026
+  value Int    @default(0)
+}

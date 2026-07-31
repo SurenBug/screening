@@ -1,0 +1,107 @@
+# Реестр инвазивной пренатальной диагностики — запуск на сервере.
+#
+# Три контейнера:
+#   postgres — база данных;
+#   app      — сервер приложения (API), слушает порт 3001 внутри сети Docker;
+#   caddy    — веб-сервер: отдаёт собранный интерфейс и проксирует /api на app,
+#              он же получает и продлевает сертификат HTTPS.
+#
+# Почему интерфейс раздаёт отдельный контейнер, а не сам сервер приложения:
+# сервер (server/src/index.ts) отвечает только на /api/* и про собранный фронтенд ничего
+# не знает. Вместо того чтобы дописывать раздачу статики в код, готовые файлы web/dist
+# кладутся внутрь образа Caddy (стадия web в Dockerfile). Плюс такого разделения в том,
+# что HTTPS, сжатие и отдача файлов — забота веб-сервера, а не приложения; при переносе
+# в контур учреждения этот контейнер можно вообще убрать и поставить перед приложением
+# уже имеющийся там nginx.
+#
+# Перед первым запуском создайте рядом с этим файлом файл .env:
+#   POSTGRES_PASSWORD=длинный-пароль-из-букв-и-цифр
+#   SITE_ADDRESS=реестр.вашеучреждение.рф
+#   ACME_EMAIL=почта@вашеучреждение.рф
+# Подробности и порядок действий — в docs/DEPLOY.md
+
+name: pdreg
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pdreg}
+      POSTGRES_USER: ${POSTGRES_USER:-pdreg}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в файле .env рядом с docker-compose.yml}
+      TZ: ${TZ:-Europe/Moscow}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pdreg} -d ${POSTGRES_DB:-pdreg}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    # Наружу порт не открываем: к базе ходит только контейнер app.
+    # Если понадобится подключиться с сервера, используйте
+    # docker compose exec postgres psql -U pdreg -d pdreg
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-pdreg}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-pdreg}?schema=public
+      NODE_ENV: production
+      PORT: 3001
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+      UPLOAD_DIR: /app/uploads
+      TZ: ${TZ:-Europe/Moscow}
+    volumes:
+      - uploads:/app/uploads
+    expose:
+      - "3001"
+    # При каждом запуске приводим таблицы в соответствие со схемой, затем стартуем API.
+    # Данные при этом не теряются: prisma db push только добавляет недостающее.
+    command: sh -c "npm run db:push -w server && node server/dist/index.js"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  caddy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      # Адрес, по которому сервис открывается в браузере. Домен должен указывать
+      # на этот сервер — иначе Caddy не сможет получить сертификат.
+      SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@example.org}
+      TZ: ${TZ:-Europe/Moscow}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      # Файл конфигурации подключаем снаружи — поменять домен можно без пересборки образа
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Полученные сертификаты, чтобы они не терялись при перезапуске
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  # Данные базы — самое ценное, что здесь есть. Именно этот том закрывают резервные копии.
+  pgdata:
+  # Загруженные файлы: сканы направлений, заключений, снимки
+  uploads:
+  caddy_data:
+  caddy_config:

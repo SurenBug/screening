@@ -1,0 +1,20 @@
+{
+  "name": "prenatal-registry",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Реестр инвазивной пренатальной диагностики",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "npm run dev -w server",
+    "dev:web": "npm run dev -w web",
+    "build": "npm run build -w server && npm run build -w web",
+    "setup": "npm install && npm run db:push -w server && npm run seed -w server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

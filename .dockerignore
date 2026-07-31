@@ -1,0 +1,26 @@
+# Что не нужно отправлять в сборку образа
+node_modules
+**/node_modules
+dist
+**/dist
+.git
+.gitignore
+
+# Локальные настройки и локальная база — на сервере свои
+.env
+.env.*
+server/.env
+server/prisma/*.db
+server/prisma/*.db-journal
+*.db
+*.db-journal
+
+uploads
+server/uploads
+backups
+*.log
+.DS_Store
+.vscode
+.idea
+docs
+README.md

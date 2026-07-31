@@ -1,0 +1,45 @@
+# Зависимости
+node_modules/
+
+# Сборка
+dist/
+build/
+.vite/
+
+# Настройки окружения — пароли и строки подключения не должны попадать в репозиторий.
+# Шаблон server/.env.example, наоборот, хранится в репозитории.
+.env
+.env.*
+!.env.example
+server/.env
+web/.env
+
+# База при разработке (SQLite)
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+server/prisma/*.db
+server/prisma/*.db-journal
+
+# Загруженные файлы: сканы направлений, заключения, снимки
+uploads/
+server/uploads/
+
+# Резервные копии базы
+backups/
+*.dump
+*.sql.gz
+
+# Логи
+*.log
+logs/
+npm-debug.log*
+yarn-error.log*
+
+# Служебное от операционной системы и редакторов
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
