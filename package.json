@@ -14,7 +14,7 @@
     "build": "npm run build -w server && npm run build -w web",
     "setup": "npm install && npm run db:push -w server && npm run seed -w server",
     "pg:schema": "node scripts/pg-schema.mjs",
-    "vercel-build": "npm run pg:schema && prisma generate --schema server/prisma/schema.postgres.prisma && npm run build -w web"
+    "vercel-build": "npm run pg:schema && prisma generate --schema server/prisma/schema.postgres.prisma && node scripts/vercel-db.mjs && npm run build -w web"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

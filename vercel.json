@@ -6,13 +6,18 @@
   "framework": null,
   "functions": {
     "api/index.ts": {
-      "memory": 1769,
       "maxDuration": 60,
       "includeFiles": "server/ocr-data/**"
     }
   },
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api" },
-    { "source": "/((?!api).*)", "destination": "/index.html" }
+    {
+      "source": "/api/(.*)",
+      "destination": "/api"
+    },
+    {
+      "source": "/((?!api).*)",
+      "destination": "/index.html"
+    }
   ]
 }
