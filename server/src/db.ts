@@ -1,6 +1,15 @@
 import { PrismaClient } from '@prisma/client'
 
-export const prisma = new PrismaClient()
+/**
+ * Neon (база на Vercel) даёт две строки подключения: через пул соединений и прямую.
+ * Приложению нужна пулерная — в бессерверной среде соединения открываются
+ * и закрываются постоянно. Prisma требует у неё пометку pgbouncer=true,
+ * поэтому берём готовую POSTGRES_PRISMA_URL, когда она есть.
+ * На своём сервере и при разработке ничего не меняется — работает DATABASE_URL.
+ */
+const url = process.env.POSTGRES_PRISMA_URL || process.env.DATABASE_URL
+
+export const prisma = new PrismaClient(url ? { datasourceUrl: url } : {})
 
 /**
  * Выдаёт следующий номер в году для кода пациентки или процедуры.
