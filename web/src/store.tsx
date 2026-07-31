@@ -1,10 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { api } from './api'
+import { ApiError, api } from './api'
 import type { DictItem, Dictionaries, User } from './types'
 
 interface AppState {
   user: User | null
   loading: boolean
+  /** Сервер недоступен — это не то же самое, что «не авторизован». */
+  offline: boolean
+  retry: () => void
   dict: Dictionaries | null
   users: User[]
   login: (login: string, password: string) => Promise<void>
@@ -25,6 +28,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
   const [dict, setDict] = useState<Dictionaries | null>(null)
   const [users, setUsers] = useState<User[]>([])
+  const [offline, setOffline] = useState(false)
+  const [attempt, setAttempt] = useState(0)
 
   const reloadDict = useCallback(async () => {
     setDict(await api.get<Dictionaries>('/dictionaries'))
@@ -35,11 +40,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
+    setLoading(true)
     api
       .get<User>('/auth/me')
-      .then(setUser)
-      .catch(() => setUser(null))
+      .then((u) => {
+        setUser(u)
+        setOffline(false)
+      })
+      .catch((err) => {
+        setUser(null)
+        // 401 — обычный «не вошёл». Всё остальное означает, что сервер не ответил,
+        // и показывать в этом случае форму входа нельзя: врач решит, что его разлогинило,
+        // и будет впустую вводить пароль
+        setOffline(!(err instanceof ApiError && err.status === 401))
+      })
       .finally(() => setLoading(false))
+  }, [attempt])
+
+  const retry = useCallback(() => setAttempt((n) => n + 1), [])
+
+  // Сеть вернулась — пробуем восстановить сеанс сами
+  useEffect(() => {
+    const onOnline = () => setAttempt((n) => n + 1)
+    window.addEventListener('online', onOnline)
+    return () => window.removeEventListener('online', onOnline)
   }, [])
 
   useEffect(() => {
@@ -55,6 +79,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (login: string, password: string) => {
     const u = await api.post<User>('/auth/login', { login, password })
     setUser(u)
+    setOffline(false)
   }, [])
 
   const logout = useCallback(async () => {
@@ -83,8 +108,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   )
 
   const value = useMemo(
-    () => ({ user, loading, dict, users, login, logout, reloadDict, reloadUsers, setUser, label, list, can }),
-    [user, loading, dict, users, login, logout, reloadDict, reloadUsers, label, list, can],
+    () => ({ user, loading, offline, retry, dict, users, login, logout, reloadDict, reloadUsers, setUser, label, list, can }),
+    [user, loading, offline, retry, dict, users, login, logout, reloadDict, reloadUsers, label, list, can],
   )
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

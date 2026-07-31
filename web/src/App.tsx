@@ -3,6 +3,7 @@ import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'reac
 import { useApp } from './store'
 import { api } from './api'
 import { Loader } from './components/ui'
+import PwaPrompts from './components/PwaPrompts'
 import { ROLE_LABELS } from './lib/labels'
 
 import LoginPage from './pages/Login'
@@ -41,7 +42,7 @@ const TITLES: [RegExp, string][] = [
 ]
 
 export default function App() {
-  const { user, loading } = useApp()
+  const { user, loading, offline, retry } = useApp()
   const [menuOpen, setMenuOpen] = useState(false)
   const location = useLocation()
 
@@ -49,7 +50,15 @@ export default function App() {
   useEffect(() => setMenuOpen(false), [location.pathname])
 
   if (loading) return <Loader />
-  if (!user) return <LoginPage />
+  // Сервер не ответил: показывать форму входа нельзя — врач подумает, что его разлогинило
+  if (!user && offline) return <OfflineScreen onRetry={retry} />
+  if (!user)
+    return (
+      <>
+        <LoginPage />
+        <PwaPrompts />
+      </>
+    )
   if (user.mustChangePassword) return <ChangePasswordPage forced />
 
   const title = TITLES.find(([re]) => re.test(location.pathname))?.[1] ?? 'Реестр'
@@ -89,6 +98,7 @@ export default function App() {
         </Routes>
 
         <BottomNav onMore={() => setMenuOpen(true)} />
+        <PwaPrompts />
       </div>
     </div>
   )
@@ -159,6 +169,34 @@ function Sidebar({ open }: { open: boolean }) {
         </div>
       </div>
     </aside>
+  )
+}
+
+/** Сервер недоступен: сеанс не потерян, данные просто негде взять. */
+function OfflineScreen({ onRetry }: { onRetry: () => void }) {
+  const [busy, setBusy] = useState(false)
+  return (
+    <div className="login-wrap">
+      <div className="login-card">
+        <h1>Нет связи с сервером</h1>
+        <p className="sub">
+          Из системы вас не выкинуло — сеанс сохранён. Данные пациенток намеренно не хранятся
+          на телефоне, поэтому без связи их не открыть.
+        </p>
+        <button
+          className="primary"
+          style={{ width: '100%', justifyContent: 'center' }}
+          disabled={busy}
+          onClick={() => {
+            setBusy(true)
+            onRetry()
+            setTimeout(() => setBusy(false), 1500)
+          }}
+        >
+          {busy ? 'Пробуем…' : 'Попробовать снова'}
+        </button>
+      </div>
+    </div>
   )
 }
 

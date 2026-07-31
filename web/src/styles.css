@@ -517,3 +517,53 @@ button.sm, .btn.sm { padding: 4px 9px; font-size: 12.5px; }
   .rec-shot-del { width: 32px; height: 32px; }
   .rec-field input[type=text], .rec-field textarea { font-size: 16px; }
 }
+
+/* ─────────────────────── Установка на телефон и обновление ───────────────────────
+   Полосы внизу экрана: предложение установить приложение и сообщение о новой
+   версии. Обе поднимаются над нижней панелью навигации и учитывают безопасную
+   зону — на телефонах с жестовой полосой иначе перекрывается системным
+   индикатором.                                                                    */
+
+.pwa-bar {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #101b26;
+  color: #e7edf3;
+  font-size: 13.5px;
+  line-height: 1.35;
+  box-shadow: 0 8px 28px rgba(16, 27, 38, 0.35);
+}
+.pwa-bar > span { flex: 1; min-width: 160px; }
+.pwa-bar.update { background: var(--accent); }
+
+.pwa-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.pwa-bar .pwa-actions button {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+.pwa-bar .pwa-actions button:hover { background: rgba(255, 255, 255, 0.2); }
+.pwa-bar .pwa-actions button.primary { background: #fff; border-color: #fff; color: #101b26; }
+.pwa-bar .pwa-actions button.primary:hover { background: #e7edf3; }
+
+@media (max-width: 900px) {
+  /* Над нижней панелью навигации */
+  .pwa-bar { bottom: calc(64px + env(safe-area-inset-bottom)); }
+  .pwa-bar > span { min-width: 100%; }
+
+  /* Установленное приложение открывается во весь экран — учитываем вырез и
+     жестовую полосу, иначе шапка уезжает под часы, а панель под индикатор */
+  .mobile-topbar { padding-top: calc(9px + env(safe-area-inset-top)); }
+  .sidebar { padding-top: env(safe-area-inset-top); }
+  .page { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
+}
+.pwa-bar.offline { background: var(--danger); }
