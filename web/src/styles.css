@@ -325,7 +325,6 @@ button.sm, .btn.sm { padding: 4px 9px; font-size: 12.5px; }
     z-index: 45;
     background: #fff;
     border-top: 1px solid var(--line);
-    padding-bottom: env(safe-area-inset-bottom);
   }
   .bottom-nav a {
     flex: 1;
@@ -528,7 +527,7 @@ button.sm, .btn.sm { padding: 4px 9px; font-size: 12.5px; }
   position: fixed;
   left: 12px;
   right: 12px;
-  bottom: calc(12px + env(safe-area-inset-bottom));
+  bottom: 12px;
   z-index: 70;
   display: flex;
   align-items: center;
@@ -557,13 +556,24 @@ button.sm, .btn.sm { padding: 4px 9px; font-size: 12.5px; }
 
 @media (max-width: 900px) {
   /* Над нижней панелью навигации */
-  .pwa-bar { bottom: calc(64px + env(safe-area-inset-bottom)); }
+  .pwa-bar { bottom: 64px; }
   .pwa-bar > span { min-width: 100%; }
 
-  /* Установленное приложение открывается во весь экран — учитываем вырез и
-     жестовую полосу, иначе шапка уезжает под часы, а панель под индикатор */
-  .mobile-topbar { padding-top: calc(9px + env(safe-area-inset-top)); }
-  .sidebar { padding-top: env(safe-area-inset-top); }
-  .page { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
+  /* Место под нижнюю панель навигации. Отступ под системную жестовую полосу
+     добавляется отдельно и только установленному приложению — в обычной
+     вкладке его отводит сам браузер, иначе снизу остаётся пустая полоса */
+  .page { padding-bottom: 84px; }
 }
 .pwa-bar.offline { background: var(--danger); }
+
+/* ─── Безопасные зоны: только в установленном приложении ─── */
+@media (display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui) {
+  @media (max-width: 900px) {
+    .bottom-nav { padding-bottom: env(safe-area-inset-bottom); }
+    .mobile-topbar { padding-top: calc(9px + env(safe-area-inset-top)); }
+    .sidebar { padding-top: env(safe-area-inset-top); }
+    .page { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
+    .pwa-bar { bottom: calc(64px + env(safe-area-inset-bottom)); }
+  }
+  .pwa-bar { bottom: calc(12px + env(safe-area-inset-bottom)); }
+}
