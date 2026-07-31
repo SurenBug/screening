@@ -9,7 +9,7 @@ import { PrismaClient } from '@prisma/client'
  */
 const url = process.env.POSTGRES_PRISMA_URL || process.env.DATABASE_URL
 
-export const prisma = new PrismaClient(url ? { datasourceUrl: url } : {})
+export const prisma = url ? new PrismaClient({ datasourceUrl: url }) : new PrismaClient()
 
 /**
  * Выдаёт следующий номер в году для кода пациентки или процедуры.
