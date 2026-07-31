@@ -43,3 +43,7 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# схема для PostgreSQL генерируется при сборке
+server/prisma/schema.postgres.prisma
+.vercel
