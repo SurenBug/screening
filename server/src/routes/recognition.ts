@@ -6,7 +6,7 @@ import { z } from 'zod'
 import { prisma } from '../db.js'
 import { authGuard } from '../auth.js'
 import { audit } from '../audit.js'
-import { recognizeBoth } from '../recognition/ocr.js'
+import { OcrTimeoutError, recognizeBoth } from '../recognition/ocr.js'
 import { DOC_TYPE_LABELS, detectDocType, parseFields, type DocType } from '../recognition/parsers.js'
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR ?? './uploads'
@@ -61,6 +61,13 @@ export default async function recognitionRoutes(app: FastifyInstance) {
         passes.push(await recognizeBoth(img.buffer))
       } catch (err) {
         req.log.error({ err }, 'ошибка распознавания')
+        if (err instanceof OcrTimeoutError) {
+          return reply.code(503).send({
+            error:
+              'Распознавание не успело отработать. На демонстрационной площадке первый запуск после простоя ' +
+              'бывает слишком долгим — повторите попытку. Если повторяется, заполните поля вручную.',
+          })
+        }
         return reply.code(500).send({ error: 'Не удалось распознать снимок. Попробуйте переснять при лучшем освещении.' })
       }
     }

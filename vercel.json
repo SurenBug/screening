@@ -7,7 +7,7 @@
   "functions": {
     "api/index.ts": {
       "maxDuration": 60,
-      "includeFiles": "server/ocr-data/**"
+      "includeFiles": "{server/ocr-data/**,node_modules/tesseract.js/**,node_modules/tesseract.js-core/**}"
     }
   },
   "rewrites": [

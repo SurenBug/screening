@@ -89,12 +89,37 @@ export interface OcrResult {
   confidence: number
 }
 
+/**
+ * Ограничение по времени. На своём сервере распознавание занимает секунды,
+ * но в бессерверном окружении первый запуск поднимает контейнер и разворачивает
+ * языковую модель — если это затягивается, лучше честно сказать об этом,
+ * чем держать врача перед крутящимся индикатором до обрыва соединения.
+ */
+const TIMEOUT_MS = Number(process.env.OCR_TIMEOUT_MS ?? 45_000)
+
+export class OcrTimeoutError extends Error {
+  constructor() {
+    super('Распознавание не уложилось в отведённое время')
+  }
+}
+
 export async function recognizeBoth(input: Buffer): Promise<OcrResult> {
   const image = await preprocess(input)
-  const [rus, eng] = await Promise.all([recognize(image, 'rus'), recognize(image, 'eng')])
-  return {
-    text: rus.text,
-    latinText: eng.text,
-    confidence: Math.max(rus.confidence, 0),
+  const work = Promise.all([recognize(image, 'rus'), recognize(image, 'eng')])
+
+  let timer: NodeJS.Timeout | undefined
+  const limit = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new OcrTimeoutError()), TIMEOUT_MS)
+  })
+
+  try {
+    const [rus, eng] = await Promise.race([work, limit])
+    return {
+      text: rus.text,
+      latinText: eng.text,
+      confidence: Math.max(rus.confidence, 0),
+    }
+  } finally {
+    clearTimeout(timer)
   }
 }
