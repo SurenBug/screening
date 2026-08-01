@@ -1,5 +1,6 @@
 import {
   has,
+  lines,
   lineWith,
   parseDate,
   parseGestation,
@@ -177,6 +178,31 @@ function detectCategory(karyotype: string | null, text: string): { code: string;
   return null
 }
 
+/**
+ * Риск вида 1:250. Заголовок раздела «Расчётный риск» тоже содержит слово «риск»,
+ * но цифр в нём нет — поэтому перебираем все подходящие строки до первой,
+ * из которой действительно получается значение.
+ */
+function riskIn(text: string, needles: string[]): string | null {
+  for (const line of lines(text)) {
+    const low = line.toLowerCase()
+    if (!needles.some((n) => low.includes(n.toLowerCase()))) continue
+    const value = parseRisk(line)
+    if (value) return value
+  }
+  return null
+}
+
+/** Первая дата в документе, кроме даты рождения — иначе она подменяет дату исследования. */
+function firstDateExceptBirth(text: string): string | null {
+  for (const line of lines(text)) {
+    if (/рожден|д\.р\./i.test(line)) continue
+    const m = line.match(/\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4}/)
+    if (m) return m[0]
+  }
+  return null
+}
+
 // ───────────────────────── Разбор по типам документов ─────────────────────────
 
 export function parseFields(docType: DocType, ocr: OcrResult): Field[] {
@@ -258,7 +284,7 @@ function referral(text: string, c: number): Field[] {
     field('bloodGroup', 'Группа крови', bloodGroup(text), c, LIKELY, lineWith(text, ['группа крови'])),
     field('rhesus', 'Резус-фактор', rhesus, c, LIKELY, rhLine),
     field('indication', 'Показание', matchCode(text, INDICATIONS), c, GUESS, lineWith(text, ['показани'])),
-    field('riskT21', 'Риск Т21 (1:X)', parseRisk(lineWith(text, ['риск'])), c, LIKELY, lineWith(text, ['риск'])),
+    field('riskT21', 'Риск Т21 (1:X)', riskIn(text, ['риск']), c, LIKELY, lineWith(text, ['риск'])),
     field('gestWeeks', 'Срок, недель', gest?.weeks, c, LIKELY),
     field('gestDays', 'Срок, дней', gest?.days, c, LIKELY),
     field('procedureType', 'Вид процедуры', matchCode(text, PROCEDURES), c, LIKELY),
@@ -277,7 +303,14 @@ function ultrasound(text: string, latin: string, c: number): Field[] {
     : null
 
   return compact([
-    field('date', 'Дата исследования', parseDate(valueAfter(text, ['Дата исследования', 'Дата УЗИ', 'Дата'])) ?? parseDate(firstDate(text)), c, LIKELY),
+    field(
+      'date',
+      'Дата исследования',
+      parseDate(valueAfterColon(text, ['Дата исследования', 'Дата УЗИ', 'Дата проведения', 'Дата'])) ??
+        parseDate(firstDateExceptBirth(text)),
+      c,
+      LIKELY,
+    ),
     field('gestWeeks', 'Срок, недель', gest?.weeks, c, LIKELY),
     field('gestDays', 'Срок, дней', gest?.days, c, LIKELY),
     field('crl', 'КТР, мм', parseNumber(valueAfter(text, ['КТР', 'Копчико-теменной размер', 'CRL'])), c),
@@ -285,9 +318,9 @@ function ultrasound(text: string, latin: string, c: number): Field[] {
     field('nasalBone', 'Носовая кость', nasalBone, c, LIKELY, nbLine),
     field('pappaMom', 'PAPP-A, МоМ', mom(text, latin, ['papp', 'папп']), c, LIKELY),
     field('hcgMom', 'β-ХГЧ, МоМ', mom(text, latin, ['хгч', 'hcg', 'бета-хгч']), c, LIKELY),
-    field('riskT21', 'Риск Т21 (1:X)', parseRisk(lineWith(text, ['трисомия 21', 'т21', 'дауна', 'риск'])), c, LIKELY),
-    field('riskT18', 'Риск Т18 (1:X)', parseRisk(lineWith(text, ['трисомия 18', 'т18', 'эдвардса'])), c, LIKELY),
-    field('riskT13', 'Риск Т13 (1:X)', parseRisk(lineWith(text, ['трисомия 13', 'т13', 'патау'])), c, LIKELY),
+    field('riskT21', 'Риск Т21 (1:X)', riskIn(text, ['трисомия 21', 'т21', 'дауна']) ?? riskIn(text, ['риск']), c, LIKELY),
+    field('riskT18', 'Риск Т18 (1:X)', riskIn(text, ['трисомия 18', 'т18', 'эдвардса']), c, LIKELY),
+    field('riskT13', 'Риск Т13 (1:X)', riskIn(text, ['трисомия 13', 'т13', 'патау']), c, LIKELY),
     field('riskProgram', 'Программа расчёта', program(text, latin), c, LIKELY),
     field('usFindings', 'УЗ-маркеры', valueAfter(text, ['Маркеры', 'УЗ-маркеры', 'Эхографические маркеры']), c, LIKELY),
     field('malformations', 'Пороки развития', valueAfter(text, ['Пороки развития', 'ВПР', 'Аномалии']), c, LIKELY),
@@ -296,12 +329,19 @@ function ultrasound(text: string, latin: string, c: number): Field[] {
 
 function nipt(text: string, c: number): Field[] {
   return compact([
-    field('niptDate', 'Дата исследования', parseDate(valueAfter(text, ['Дата исследования', 'Дата взятия', 'Дата'])) ?? parseDate(firstDate(text)), c, LIKELY),
+    field(
+      'niptDate',
+      'Дата исследования',
+      parseDate(valueAfterColon(text, ['Дата исследования', 'Дата взятия', 'Дата'])) ??
+        parseDate(firstDateExceptBirth(text)),
+      c,
+      LIKELY,
+    ),
     field('niptLab', 'Лаборатория', valueAfter(text, ['Лаборатория', 'Выполнено в', 'Медицинский центр']), c, LIKELY),
     field('niptResult', 'Результат', valueAfterColon(text, ['Результат', 'Заключение', 'Вывод']) ?? lineWith(text, ['риск']), c, LIKELY),
-    field('riskT21', 'Риск Т21 (1:X)', parseRisk(lineWith(text, ['трисомия 21', 'т21', 'дауна'])), c, LIKELY),
-    field('riskT18', 'Риск Т18 (1:X)', parseRisk(lineWith(text, ['трисомия 18', 'т18'])), c, LIKELY),
-    field('riskT13', 'Риск Т13 (1:X)', parseRisk(lineWith(text, ['трисомия 13', 'т13'])), c, LIKELY),
+    field('riskT21', 'Риск Т21 (1:X)', riskIn(text, ['трисомия 21', 'т21', 'дауна']), c, LIKELY),
+    field('riskT18', 'Риск Т18 (1:X)', riskIn(text, ['трисомия 18', 'т18']), c, LIKELY),
+    field('riskT13', 'Риск Т13 (1:X)', riskIn(text, ['трисомия 13', 'т13']), c, LIKELY),
   ])
 }
 
